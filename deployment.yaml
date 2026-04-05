@@ -1,0 +1,185 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: mariadb-pvc
+  namespace: pos-system
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 2Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mariadb
+  namespace: pos-system
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: mariadb
+  template:
+    metadata:
+      labels:
+        app: mariadb
+    spec:
+      containers:
+      - name: mariadb
+        image: mariadb:11.4
+        ports:
+        - containerPort: 3306
+        env:
+        - name: MYSQL_ROOT_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: pos-db-secret
+              key: MYSQL_ROOT_PASSWORD
+        - name: MYSQL_DATABASE
+          valueFrom:
+            secretKeyRef:
+              name: pos-db-secret
+              key: MYSQL_DATABASE
+        - name: MYSQL_USER
+          valueFrom:
+            secretKeyRef:
+              name: pos-db-secret
+              key: MYSQL_USER
+        - name: MYSQL_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: pos-db-secret
+              key: MYSQL_PASSWORD
+        volumeMounts:
+        - name: mariadb-data
+          mountPath: /var/lib/mysql
+      volumes:
+      - name: mariadb-data
+        persistentVolumeClaim:
+          claimName: mariadb-pvc
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: mariadb
+  namespace: pos-system
+spec:
+  selector:
+    app: mariadb
+  ports:
+  - port: 3306
+    targetPort: 3306
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: pos-backend
+  namespace: pos-system
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: pos-backend
+  template:
+    metadata:
+      labels:
+        app: pos-backend
+    spec:
+      containers:
+      - name: pos-backend
+        image: localhost:30500/pos-backend:latest
+        ports:
+        - containerPort: 8000
+        env:
+        - name: PORT
+          value: "8000"
+        - name: DB_HOST
+          valueFrom:
+            secretKeyRef:
+              name: pos-db-secret
+              key: DB_HOST
+        - name: DB_USER
+          valueFrom:
+            secretKeyRef:
+              name: pos-db-secret
+              key: MYSQL_USER
+        - name: DB_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: pos-db-secret
+              key: MYSQL_PASSWORD
+        - name: DB_NAME
+          valueFrom:
+            secretKeyRef:
+              name: pos-db-secret
+              key: MYSQL_DATABASE
+        - name: JWT_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: pos-db-secret
+              key: JWT_SECRET
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: pos-backend
+  namespace: pos-system
+spec:
+  selector:
+    app: pos-backend
+  ports:
+  - port: 8000
+    targetPort: 8000
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: pos-frontend
+  namespace: pos-system
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: pos-frontend
+  template:
+    metadata:
+      labels:
+        app: pos-frontend
+    spec:
+      containers:
+      - name: nginx
+        image: localhost:30500/pos-frontend:latest
+        ports:
+        - containerPort: 80
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: pos-frontend
+  namespace: pos-system
+spec:
+  selector:
+    app: pos-frontend
+  ports:
+  - port: 80
+    targetPort: 80
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: pos-ingress
+  namespace: pos-system
+spec:
+  ingressClassName: nginx
+  rules:
+  - host: pos.home
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: pos-frontend
+            port:
+              number: 80
